@@ -1,5 +1,8 @@
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"]="" # For computation only on CPU activate this.
+import flow_vis
+
+os.environ["KERAS_BACKEND"] = 'tensorflow'
 
 import math
 import time
@@ -14,6 +17,7 @@ from keras.preprocessing import image
 from keras.callbacks import ModelCheckpoint, EarlyStopping, TerminateOnNaN
 
 from PIL import Image, ImageDraw
+import matplotlib.pyplot as plt
 from keras.regularizers import l2
 
 from custom_layers import PrepareForExtraction, Aggregation, BottomLevel, MaxPoolingWithArgmax, Disaggregation, \
@@ -55,7 +59,7 @@ def read_training_data():
             sequences[s] = num_frames
         except NotADirectoryError:
             continue
-    # sequences = {'alley_2':50, 'market_2':50}   # hardcoded fast way for debugging
+    sequences = {'alley_2':2}   # hardcoded fast way for debugging
     # sequences = {'sleeping_2': 50, 'alley_2': 50, 'market_2': 50, 'shaman_2': 50, 'temple_2': 50, 'cave_2': 50, 'bandage_2': 50, 'bamboo_2': 50}
     print(sequences)
     return sequences
@@ -189,6 +193,127 @@ def generator(sequences, stride, offset, radius, subsampled_padding, valid_patch
             skipped_windows = 0
 
 
+def dm_match_pair(img_path_a, img_path_b, stride=8, offset=4, radius=10, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False):
+    # Start timer:
+    time2 = time.time()
+
+    vpl = valid_patch_length
+
+    # Define size of windows:
+    valid_patch_length = stride * valid_patch_length
+    ref_padding = sum([2**i for i in range(levels - valid_dilation_steps, levels)]) * stride
+    total_patch_length = valid_patch_length + 2 * ref_padding
+    print(total_patch_length)
+    # Define size of patch, which are windows without padding:
+    p_patch_shape = (total_patch_length, total_patch_length)
+    q_patch_shape = (total_patch_length + 2 * radius, total_patch_length + 2 * radius)
+    subsampled_ref_padding = int(ref_padding / stride)
+
+    # Create Keras Input layers for two images:
+    input_p = Input(shape=p_patch_shape + (3,), batch_shape=(1,) + p_patch_shape + (3,))
+    input_q = Input(shape=q_patch_shape + (3,), batch_shape=(1,) + q_patch_shape + (3,))
+
+    # Use pre-trained VGG network to compute image descriptors:
+    p, q = calculate_descriptors_by_vgg(input_p, input_q)
+
+    # Build DeepMatching tensorflow graph:
+    dm = deep_matching(p, q, stride, offset, radius, levels, share_exponent=share_exponent)
+
+    # Crop result of DeepMatching:
+    dm_shape = dm.shape.as_list()
+    dm = Reshape([dm.shape.as_list()[1], dm.shape.as_list()[2], -1])(dm)
+    dm = Cropping2D(subsampled_ref_padding)(dm)
+    dm = Reshape([dm.shape.as_list()[1], dm.shape.as_list()[2], dm_shape[3], dm_shape[4]])(dm)
+
+    # Generate indices:
+    indices, indices_x, indices_y = get_indices(p_patch_shape)
+
+    indices_x = indices_x[offset::stride, offset::stride]
+    indices_y = indices_y[offset::stride, offset::stride]
+
+    indices_x = indices_x[subsampled_ref_padding:-subsampled_ref_padding, subsampled_ref_padding:-subsampled_ref_padding]
+    indices_y = indices_y[subsampled_ref_padding:-subsampled_ref_padding, subsampled_ref_padding:-subsampled_ref_padding]
+
+    # compute matches from scoring map:
+    matches = Lambda(
+        lambda x: tf.expand_dims(
+            tf.py_func(get_match, [x, indices_x, indices_y, stride, offset, radius, 0], Tout=tf.float32), axis=0),
+        output_shape=indices_x.shape + (2,), name="matches")(dm)
+
+    # build Keras model for matching:
+    model = Model(inputs=[input_p, input_q], outputs=[matches])
+
+    model.load_weights("weights.h5py")    # initialize weights from training
+
+
+    ref_image = image.load_img(img_path_a)
+    tar_image = image.load_img(img_path_b)
+
+    # Preprocess data:
+    ref_image = preprocess_image(ref_image)
+    tar_image = preprocess_image(tar_image)
+
+    # Create windows:
+    ref_window_size = total_patch_length
+    tar_window_size = 2 * radius + total_patch_length
+    
+    # Additional padding for matching (so that border pixels are matched):
+    ref_image = np.pad(ref_image, [(ref_padding, total_patch_length - ref_padding), (ref_padding, total_patch_length - ref_padding), (0, 0)], 'reflect')
+    tar_image = np.pad(tar_image, [(ref_padding + radius, total_patch_length - ref_padding + radius), (ref_padding + radius, total_patch_length - ref_padding + radius), (0, 0)], 'reflect')
+
+
+    ref_image_windows = view_as_windows(ref_image, (ref_window_size, ref_window_size, 3), step=valid_patch_length)
+    tar_image_windows = view_as_windows(tar_image, (tar_window_size, tar_window_size, 3), step=valid_patch_length)
+
+    print(ref_image_windows.shape)
+
+
+    full_image = Image.new('RGB', (1024, 436))    # for saving an image
+    im = np.zeros((ref_image_windows.shape[0]*vpl, ref_image_windows.shape[1]*vpl, 2))
+    print(im.shape)
+
+    rows = []
+
+    m = 0
+    while m < ref_image_windows.shape[0]:
+        cols = []
+        n = 0
+        while n < ref_image_windows.shape[1]:
+
+            # Current window:
+            ref_window = ref_image_windows[m, n, 0]
+            tar_window = tar_image_windows[m, n, 0]
+            n += 1
+
+            # Adding batch_size:
+            ref_window = np.expand_dims(ref_window, 0)
+            tar_window = np.expand_dims(tar_window, 0)
+
+            matches = model.predict([ref_window, tar_window], batch_size=1)
+
+            # Shift so that center of patch has coordinate (0, 0)
+            matches = matches - radius
+
+            cols.append(matches)
+        # print(m)
+        rows.append(np.concatenate(cols, axis=-2))
+        m += 1
+
+    return np.squeeze(np.concatenate(rows, axis=1))
+
+
+
+    # print(np.asarray(rows)[1,1,0].shape)
+    # print(np.asarray(rows)[1,1,0])
+
+            # temp_img = Image.fromarray(
+            # ((np.squeeze(p)[ref_padding:-ref_padding, ref_padding:-ref_padding] + 1) * 127.5).astype('uint8'), 'RGB')
+            # temp_img = visualize_correct_matches(np.squeeze(result), np.squeeze(t), temp_img, 2, stride, offset)
+            # full_image.paste(temp_img, (i * valid_patch_length, j * valid_patch_length))
+
+
+
+
 def dm_match(stride, offset, radius, levels, valid_patch_length, valid_dilation_steps, share_exponent):
     # Start timer:
     time2 = time.time()
@@ -282,11 +407,14 @@ def dm_match(stride, offset, radius, levels, valid_patch_length, valid_dilation_
                     with open('matches.txt', 'w') as f:
                         print(dict, file=f)
 
+
                     temp_img = Image.fromarray(
                         ((np.squeeze(p)[ref_padding:-ref_padding, ref_padding:-ref_padding] + 1) * 127.5).astype('uint8'), 'RGB')
                     temp_img = visualize_correct_matches(np.squeeze(result), np.squeeze(t), temp_img, 2, stride, offset)
                     full_image.paste(temp_img, (i * valid_patch_length, j * valid_patch_length))
                     x = gen.__next__()
+                
+                print(f"{j+1}/{x[3][0]} rows of patches processed.")
 
     acc_occ_2 = count_cor_2 / (count_all - count_occ)
     acc_occ_oor_2 = count_cor_2 / (count_all - count_occ - count_oor)
@@ -504,6 +632,7 @@ def deep_matching(p, q, alpha, beta, radius, max_level, share_exponent, exponent
     return refined_maps[-1]
 
 # Extracts matches from DeepMatching scoring map:
+# Match coordinates in [0, dm.shape[3]] x [0, dm.shape[4]]
 def get_match(dm, p1, p2, alpha, beta, r, l):
     patch = dm[0, :, :, :, :]
     patch_shape = patch.shape
@@ -575,9 +704,30 @@ def visualize_correct_matches(correspondence, truth, imageA, threshold, alpha, b
     # img.show()
 
 
+def visualize_matches(matches, img_path, stride, offset):
+    img = Image.open(img_path)
+    draw = ImageDraw.Draw(img)
+
+    for i in range(0, matches.shape[0]):
+        for j in range(0, matches.shape[1]):
+            p1 = i * stride + offset
+            p2 = j * stride + offset
+
+            draw.line([(p2, p1), (p2 + matches[i, j, 1], p1 + matches[i, j, 0])])
+    img.show()
+
+
 # Run training:
 #dm_train(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
 
 # Run matching:
-dm_match(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
+# dm_match(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
+
+res = dm_match_pair("MPI-Sintel/training/clean/alley_1/frame_0001.png", "MPI-Sintel/training/clean/alley_1/frame_0002.png")
+# visualize_matches(res, "MPI-Sintel/training/clean/alley_1/frame_0001.png", 8, 4)
+flow_color = flow_vis.flow_to_color(res, convert_to_bgr=False)
+plt.imshow(flow_color)
+plt.show()
+# optimally valid_dilation_steps == levels
+# for valid_patch_length use formula on p.41; valid_patch_length needs to be smaller than dim of reference image
 
