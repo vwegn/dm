@@ -55,8 +55,8 @@ class PrepareForExtraction(Layer):
         assert isinstance(input_shape, list)
         shape_p, shape_q = input_shape
 
-        shape_p_1 = math.floor((shape_p[1] - self.offset) / self.stride) + 1
-        shape_p_2 = math.floor((shape_p[2] - self.offset) / self.stride) + 1
+        shape_p_1 = math.ceil((shape_p[1] - self.offset) / self.stride)
+        shape_p_2 = math.ceil((shape_p[2] - self.offset) / self.stride)
 
         return [[shape_p[0], shape_p_1, shape_p_2, shape_p[3]], [shape_q[0], shape_q[1], shape_q[2], shape_q[3]]]
 
@@ -129,7 +129,7 @@ class Aggregation(Layer):
         layer = K.reshape(layer, (pH, pW, -1, 1))
         layer = K.permute_dimensions(layer, [2, 0, 1, 3])
 
-        # Compute aggregation by dialted convolotuin:
+        # Compute aggregation by dilated convolution:
         layer = K.conv2d(layer, agg_kernel_for_dilation(), strides=(1, 1), padding='same',
                          dilation_rate=(2 * (2 ** self.levels), 2 * (2 ** self.levels)))
 
