@@ -249,9 +249,12 @@ def dm_match_pair(img_path_a, img_path_b, stride=8, offset=4, radius=10, levels=
     ref_image = image.load_img(img_path_a)
     tar_image = image.load_img(img_path_b)
 
+
     # Preprocess data:
     ref_image = preprocess_image(ref_image)
     tar_image = preprocess_image(tar_image)
+
+    dims = ref_image.shape
 
     # Create windows:
     ref_window_size = total_patch_length
@@ -267,8 +270,6 @@ def dm_match_pair(img_path_a, img_path_b, stride=8, offset=4, radius=10, levels=
 
     print(ref_image_windows.shape)
 
-
-    full_image = Image.new('RGB', (1024, 436))    # for saving an image
     im = np.zeros((ref_image_windows.shape[0]*vpl, ref_image_windows.shape[1]*vpl, 2))
     print(im.shape)
 
@@ -299,8 +300,9 @@ def dm_match_pair(img_path_a, img_path_b, stride=8, offset=4, radius=10, levels=
         rows.append(np.concatenate(cols, axis=-2))
         m += 1
 
-    return np.squeeze(np.concatenate(rows, axis=1))
-
+    res = np.squeeze(np.concatenate(rows, axis=1))
+    sub_dims = [math.ceil((dims[0] - offset) / stride), math.ceil((dims[1] - offset) / stride)]
+    return res[:sub_dims[0], :sub_dims[1]]
 
 
     # print(np.asarray(rows)[1,1,0].shape)
@@ -567,6 +569,7 @@ def calculate_descriptors_by_vgg(input_p, input_q):
     q = vgg_partial(input_q)
     return p, q
 
+
 # main DeepMatching architecture:
 def deep_matching(p, q, alpha, beta, radius, max_level, share_exponent, exponents=None):
     # STEP 0: Preprocess Input (Descriptor extraction, normalization, patch extraction)
@@ -630,6 +633,7 @@ def deep_matching(p, q, alpha, beta, radius, max_level, share_exponent, exponent
         print("Q" + str(i - 1) + " " + str(refined_maps[-1].shape))
     print("Building complete!")
     return refined_maps[-1]
+
 
 # Extracts matches from DeepMatching scoring map:
 # Match coordinates in [0, dm.shape[3]] x [0, dm.shape[4]]
@@ -720,7 +724,7 @@ def visualize_matches(matches, img_path, stride, offset):
 # Run training:
 #dm_train(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
 
-# Run matching:
+# Run matching evaluation:
 # dm_match(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
 
 res = dm_match_pair("MPI-Sintel/training/clean/alley_1/frame_0001.png", "MPI-Sintel/training/clean/alley_1/frame_0002.png")
