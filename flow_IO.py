@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.4
 
-# Quelle: https://lmb.informatik.uni-freiburg.de/resources/datasets/IO.py
+# Source: https://lmb.informatik.uni-freiburg.de/resources/datasets/IO.py
 
 import os
 import re

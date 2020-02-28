@@ -59,7 +59,7 @@ def read_training_data():
             sequences[s] = num_frames
         except NotADirectoryError:
             continue
-    sequences = {'alley_2':2}   # hardcoded fast way for debugging
+    # sequences = {'alley_2':2}   # hardcoded fast way for debugging
     # sequences = {'sleeping_2': 50, 'alley_2': 50, 'market_2': 50, 'shaman_2': 50, 'temple_2': 50, 'cave_2': 50, 'bandage_2': 50, 'bamboo_2': 50}
     print(sequences)
     return sequences
@@ -719,19 +719,4 @@ def visualize_matches(matches, img_path, stride, offset):
 
             draw.line([(p2, p1), (p2 + matches[i, j, 1], p1 + matches[i, j, 0])])
     img.show()
-
-
-# Run training:
-#dm_train(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
-
-# Run matching evaluation:
-# dm_match(stride=8, offset=4, radius=40, levels=3, valid_dilation_steps=3, valid_patch_length=13, share_exponent=False)
-
-res = dm_match_pair("MPI-Sintel/training/clean/alley_1/frame_0001.png", "MPI-Sintel/training/clean/alley_1/frame_0002.png")
-# visualize_matches(res, "MPI-Sintel/training/clean/alley_1/frame_0001.png", 8, 4)
-flow_color = flow_vis.flow_to_color(res, convert_to_bgr=False)
-plt.imshow(flow_color)
-plt.show()
-# optimally valid_dilation_steps == levels
-# for valid_patch_length use formula on p.41; valid_patch_length needs to be smaller than dim of reference image
 
