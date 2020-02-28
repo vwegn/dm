@@ -56,7 +56,7 @@ The picture below is an example of the matching results. It was performed with t
 Note, that as opposed to `dm_match` in `dm_match_pair` occlusions and out of radius pixels are not removed, which leads to more errors and therefore some artifacts in the picture. Also, no further optical flow optimization is applied. Due to subsampling the resolution of the resulting image is low.
 
 
-![](https://cdn.discordapp.com/attachments/639392286127554560/682975680707035136/Figure_4.png)
+![](/images/example_alley_1.png)
 
 ### Evaluation
 |  | Untrained | Trained* | Difference |
