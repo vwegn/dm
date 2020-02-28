@@ -6,9 +6,9 @@ This work was created as part of a Master Thesis in the Institute for Applied Ma
 
 
 ## Installation
-:::info
-As of 2020 the following installation process does not support GPU execution of the code anymore. Currently, there are no plans for updates to TensorFlow 2 or other versions.
-:::
+
+__Info:__ As of 2020 the following installation process does not support GPU execution of the code anymore. Currently, there are no plans for updates to TensorFlow 2 or other versions.
+
 
 Create virtual environment and activate:
 + (```conda config --append channels conda-forge```)
